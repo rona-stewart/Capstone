@@ -1,0 +1,281 @@
+---
+title: 'Text Prediction: Milestone Report'
+author: "Rona Stewart"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, results = "hide", warning = FALSE, message = FALSE)
+
+# Load the relevant libraries
+library(tidytext); library(tm); library(quanteda); library(dplyr); library(quanteda.textstats); library(data.table)
+```
+
+## Introduction
+
+The purpose of this report is to provide an initial view of the data available to support the Capstone project for the Johns Hopkins University Data Science Specialisation.  This project involves the creation and publication of a predictive text product which will take an input of a phrase (multiple words) in a text box and output a prediction of the next word.  
+  
+Essentially, this means we are looking for a dataset containing strings of text which can be assessed for specific patterns and frequencies of word counts, for example how often specific word combinations appear, in order to train an algorithm to identify suggestions for the next word, given a series of predictor words.  
+  
+This early report will set out an overview of the data and some characteristics, as well as detailing the intended next steps in developing an algorithm for the prediction model.
+
+## Obtaining and Reading the Data
+The data are provided by Johns Hopkins University in partnership with SwiftKey, and made available via the <a href = https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip > Coursera website</a> as at `r Sys.Date()`.  
+
+``` {r downloaddata, eval = FALSE}
+
+## Obtain the datasets
+download.file ("https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip","Coursera-SwiftKey.zip")
+
+## Unzip the dataset 
+zipfilepath <- "./Coursera-Swiftkey.zip"
+extracted_dir <- "./Data"
+if (!dir.exists(extracted_dir)) {
+        dir.create(extracted_dir)
+}
+unzip(zipfilepath, exdir = extracted_dir)
+```
+
+```{r getdata}
+# Create a directory path to the files
+firstfolder <- list.files("./Data")
+filepath <- file.path("./Data",firstfolder)
+
+secondfolder <- list.files(file.path(".","Data",firstfolder))
+allfilepaths <- NULL
+
+for (i in 1:length(secondfolder)){
+        thirdfolder <- list.files(file.path(".","Data",firstfolder,secondfolder[i]))
+        allfilepaths <- c(allfilepaths, file.path(".","Data",firstfolder, secondfolder[i],thirdfolder))
+}
+
+# Explore the EN data files
+ENfiles <- allfilepaths[4:6]
+len1 <- length(readLines(ENfiles[1])) # Note that this returns 899288 entries
+len2 <- length(readLines(ENfiles[2])) # Note that this returns 77259 entries
+len3 <- length(readLines(ENfiles[3])) # Note that this returns 2360148 entries
+
+# Given the volume of data, read only a random subset (30%) of each file in to the training data for manipulation
+### Set seed to ensure reproducability of results
+set.seed(1240)
+### Create a vector identifying those elements for the training set
+inTrain1 <- caret::createDataPartition(y = (1:len1), p=0.3, list = TRUE)
+inTrain2 <- caret::createDataPartition(y = (1:len2), p=0.3, list = TRUE)
+inTrain3 <- caret::createDataPartition(y = (1:len3), p=0.3, list = TRUE)
+
+# Read in the data and create the subset for analysis
+data1 <- readLines(ENfiles[1], skipNul = TRUE)
+blogssub <- data1[inTrain1$Resample1]
+
+data2 <- readLines(ENfiles[2], skipNul = TRUE)
+newssub <- data2[inTrain2$Resample1]
+
+data3 <- readLines(ENfiles[3], skipNul = TRUE)
+twitsub <- data3[inTrain3$Resample1]
+
+datasub <- c(blogssub, newssub, twitsub)
+
+```
+  
+The first stage is to download and read the data, which shows that there are four different languages of data provided (English, Finnish, German and Russian).  For the purposes of this project, the English language dataset is utilised.  Within the English language folder, there are three files, sourced from blogs, news articles and tweets.  Given that the dataset will be used to train a language model, it is separated into a training set. Since there is a large volume of data available, 30% of each file is randomly selected to be included in the training set.  This is summarised below:
+
+```{r totalsum, results = "markup", comment = ""}
+sumLines <- tibble(Source_file = c("Blogs","News","Twitter"),
+                   Total_lines = c(len1, len2, len3), 
+                   Sample_lines = c(length(blogssub), length(newssub),length(twitsub)))
+sumLines
+```
+
+  
+Taking the training datasets then, we consider the total and average number of words from each source, as well as the most frequent word (noting that common joining words, such as "the", "a", "in" etc. have been removed):
+
+```{r trainsetsum, results = "markup", comment = ""}
+# Manipulate the training datasets to tokens
+blogssub <- tokens(blogssub, remove_punct = TRUE)
+newssub <- tokens(newssub, remove_punct = TRUE)
+twitsub <- tokens(twitsub, remove_punct = TRUE)
+
+# Create tables of the most frequent word for each source
+dfmat_blogs <- blogssub %>% tokens_remove(stopwords("english")) %>% dfm()
+dfmat_news <- newssub %>% tokens_remove(stopwords("english")) %>% dfm()
+dfmat_tweets <- twitsub %>% tokens_remove(stopwords("english")) %>% dfm()
+
+# Create a table summarising the lines and words in each training dataset
+sumSamples <- tibble(Sample = c("Blogs","News","Twitter"),
+                     Total_lines = c(length(blogssub), length(newssub), length(twitsub)),
+                     Total_words = c(sum(ntoken(blogssub)),sum(ntoken(newssub)),
+                                     sum(ntoken(twitsub))),
+                     Max_words = c(max(ntoken(blogssub)), max(ntoken(newssub)),
+                                   max(ntoken(twitsub))),
+                     Ave_words = c(round(mean(ntoken(blogssub)),0),
+                                   round(mean(ntoken(newssub)),1),
+                                   round(mean(ntoken(twitsub)),1)),
+                     Most_freq_word = c(textstat_frequency(dfmat_blogs,n=1)[1,1],
+                                        textstat_frequency(dfmat_news,n=1)[1,1],
+                                        textstat_frequency(dfmat_tweets,n=1)[1,1]))
+sumSamples
+```
+
+
+## Visualising the Data
+
+Finally, we consider the distribution of lengths (in words) of the lines from each source:
+
+```{r plots, results = "asis"}
+par(mfrow = c(1,3))
+hist(ntoken(blogssub), col = "skyblue", main = "Blogs", xlab = "No. words"); 
+hist(ntoken(newssub), col = "seagreen", main = "News", xlab = "No. words"); 
+hist(ntoken(twitsub), col = "salmon", main = "Twitter", xlab = "No. words") 
+
+```
+
+## Summary of Observations
+
+Generally, it can be observed that while there is a fairly broad range (particularly from Blogs and News sources), the word count for the vast majority of the lines is skewed to the lower end of the range in each case.
+
+## Next Steps
+
+```{r allranked, results = "hide"}
+dfmat_all <- rbind(dfmat_blogs, dfmat_news, dfmat_tweets)
+all_ranked <- textstat_frequency(dfmat_tweets)
+all_ranked <- all_ranked %>%
+        mutate(cumfreq = cumsum(frequency)) %>%
+        mutate(prop = cumfreq/(sum(frequency)))
+```
+
+It is intended that the <a href = https://en.wikipedia.org/wiki/Katz%27s_back-off_model > Katz's Back-off model</a> will be used to develop the prediction algorithm.  In order to use this, the the data will be considered as a series of unigrams, bigrams and trigrams (i.e. one word groupings, two-word groupings and three-word groupings), with frequencies attached to each.  This will enable a probability of a specific word occurring given the previous word(s) - the input phrase in the app.  
+
+In addition to the word bank created, which will be based on the training dataset as described above (although note that this may be further reduced for a specific coverage, given that it can already be seen that 90% of the total words are covered by `r round((which(all_ranked$prop >= 0.9, arr.ind = TRUE)[1])/(sum(all_ranked$frequency)),0)`% of the unique words), it is important to consider the case where specific input phrases or words have not been included within the training dataset. This will be further explored and a specific probability assigned to the unobserved combinations for consideration in the model.
+
+
+\pagebreak
+## Appendix 1: Environment
+
+The environment this analyses was undertaken in is described below:  
+* OS: Windows  
+* CPU: intel COREi5  
+* Software: RStudio 2023.12.1+402 "Ocean Storm" Release (4da58325ffcff29d157d9264087d4b1ab27f7204, 2024-01-28) for windows, Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) RStudio/2023.12.1+402 Chrome/116.0.5845.190 Electron/26.2.4 Safari/537.36  
+* R version 4.3.2 (2023-10-31 ucrt), Platform: x86_64-w64-mingw32/x64 (64-bit)  
+* RStudio libraries: tidytext, tm, quanteda, dplyr, quanteda.textstats, data.table
+
+\pagebreak
+## Appendix 2: Code
+```{r setupcode, eval = FALSE, echo = TRUE}
+knitr::opts_chunk$set(echo = FALSE, results = "hide", warning = FALSE, message = FALSE)
+
+# Load the relevant libraries
+library(tidytext); library(tm); library(quanteda); library(dplyr); library(quanteda.textstats); library(data.table)
+```
+
+``` {r downloaddatacode, eval = FALSE, echo = TRUE}
+
+## Obtain the datasets
+download.file ("https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip","Coursera-SwiftKey.zip")
+
+## Unzip the dataset 
+zipfilepath <- "./Coursera-Swiftkey.zip"
+extracted_dir <- "./Data"
+if (!dir.exists(extracted_dir)) {
+        dir.create(extracted_dir)
+}
+unzip(zipfilepath, exdir = extracted_dir)
+```
+
+
+```{r getdatacode, eval = FALSE, echo = TRUE}
+# Create a directory path to the files
+firstfolder <- list.files("./Data")
+filepath <- file.path("./Data",firstfolder)
+
+secondfolder <- list.files(file.path(".","Data",firstfolder))
+allfilepaths <- NULL
+
+for (i in 1:length(secondfolder)){
+        thirdfolder <- list.files(file.path(".","Data",firstfolder,secondfolder[i]))
+        allfilepaths <- c(allfilepaths, file.path(".","Data",firstfolder, secondfolder[i],thirdfolder))
+}
+
+# Explore the EN data files
+ENfiles <- allfilepaths[4:6]
+len1 <- length(readLines(ENfiles[1])) # Note that this returns 899288 entries
+len2 <- length(readLines(ENfiles[2])) # Note that this returns 77259 entries
+len3 <- length(readLines(ENfiles[3])) # Note that this returns 2360148 entries
+
+# Given the volume of data, read only a random subset (30%) of each file in to the training data for manipulation
+### Set seed to ensure reproducability of results
+set.seed(1240)
+### Create a vector identifying those elements for the training set
+inTrain1 <- caret::createDataPartition(y = (1:len1), p=0.3, list = TRUE)
+inTrain2 <- caret::createDataPartition(y = (1:len2), p=0.3, list = TRUE)
+inTrain3 <- caret::createDataPartition(y = (1:len3), p=0.3, list = TRUE)
+
+# Read in the data and create the subset for analysis
+data1 <- readLines(ENfiles[1], skipNul = TRUE)
+blogssub <- data1[inTrain1$Resample1]
+
+data2 <- readLines(ENfiles[2], skipNul = TRUE)
+newssub <- data2[inTrain2$Resample1]
+
+data3 <- readLines(ENfiles[3], skipNul = TRUE)
+twitsub <- data3[inTrain3$Resample1]
+
+datasub <- c(blogssub, newssub, twitsub)
+
+```
+
+
+```{r totalsumcode, eval = FALSE, echo = TRUE}
+sumLines <- tibble(Source_file = c("Blogs","News","Twitter"),
+                   Total_lines = c(len1, len2, len3), 
+                   Sample_lines = c(length(blogssub), length(newssub),length(twitsub)))
+sumLines
+```
+
+
+```{r trainsetsumcode, eval = FALSE, echo = TRUE}
+# Manipulate the training datasets to tokens
+blogssub <- tokens(blogssub, remove_punct = TRUE)
+newssub <- tokens(newssub, remove_punct = TRUE)
+twitsub <- tokens(twitsub, remove_punct = TRUE)
+
+# Create tables of the most frequent word for each source
+dfmat_blogs <- blogssub %>% tokens_remove(stopwords("english")) %>% dfm()
+dfmat_news <- newssub %>% tokens_remove(stopwords("english")) %>% dfm()
+dfmat_tweets <- twitsub %>% tokens_remove(stopwords("english")) %>% dfm()
+
+# Create a table summarising the lines and words in each training dataset
+sumSamples <- tibble(Sample = c("Blogs","News","Twitter"),
+                     Total_lines = c(length(blogssub), length(newssub), length(twitsub)),
+                     Total_words = c(sum(ntoken(blogssub)),sum(ntoken(newssub)),
+                                     sum(ntoken(twitsub))),
+                     Max_words = c(max(ntoken(blogssub)), max(ntoken(newssub)),
+                                   max(ntoken(twitsub))),
+                     Ave_words = c(round(mean(ntoken(blogssub)),0),
+                                   round(mean(ntoken(newssub)),1),
+                                   round(mean(ntoken(twitsub)),1)),
+                     Most_freq_word = c(textstat_frequency(dfmat_blogs,n=1)[1,1],
+                                        textstat_frequency(dfmat_news,n=1)[1,1],
+                                        textstat_frequency(dfmat_tweets,n=1)[1,1]))
+sumSamples
+```
+
+
+```{r plotscode, eval = FALSE, echo = TRUE}
+# Create histograms of word count frequency
+par(mfrow = c(1,3))
+hist(ntoken(blogssub), col = "skyblue", main = "Blogs", xlab = "No. words"); 
+hist(ntoken(newssub), col = "seagreen", main = "News", xlab = "No. words"); 
+hist(ntoken(twitsub), col = "salmon", main = "Twitter", xlab = "No. words") 
+
+```
+
+
+```{r allrankedcode, eval = FALSE, echo = TRUE}
+# Create a single ranked data table of frequency of words across all sources
+dfmat_all <- rbind(dfmat_blogs, dfmat_news, dfmat_tweets)
+all_ranked <- textstat_frequency(dfmat_tweets)
+all_ranked <- all_ranked %>%
+        mutate(cumfreq = cumsum(frequency)) %>%
+        mutate(prop = cumfreq/(sum(frequency)))
+```
