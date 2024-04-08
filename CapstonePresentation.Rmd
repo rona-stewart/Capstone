@@ -1,0 +1,60 @@
+---
+title: "CapstonePresentation"
+author: "Rona Stewart"
+date: "`r Sys.Date()`"
+output:
+  slidy_presentation: default
+  ioslides_presentation: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Introduction
+
+- This presentation summarises the work undertaken as part of the Capstone project for the Johns Hopkins University Data Science Specialisation.
+- This project involves the creation and publication of a predictive text product which will take an input of a phrase (multiple words) in a text box and output a prediction of the next word, given the preceeding words.
+- The remainder of this presentation will cover:  
+  - The overview of the initial data cleansing exercise  
+  - A summary of the model build process  
+  - An assessment of the accuracy of the tool built  
+  - An example output from the prediction tool
+
+## Data Cleanse
+
+- Initially, the three files used to develop the corpus (or 'wordbank') to underpin the prediction model were very large, and also contained a number of undesirable qualities (e.g. emojis being included).
+- As a result, a series of data cleansing steps were taken, including removing specific words (e.g. profanities), removing punctuation, email addresses, Twitter handles etc. 
+- This both reduced the memory required to operate with the data, but also enhanced the understandability and efficacy of the output.
+- The data were also separated into a test set and a training set for each source.
+
+
+## Model Build
+
+- In order to build a prediction model, the data was first separated into a series of 'ngrams', or combinations of observed words, from unigrams (one-word strings) to quadgrams (four-word strings), to be used as the basis for the search for a reasonable prediction of the next word.  
+- A function was then built to take as an input a predictor, a string of words which would be used to predict the likely next word (based on the final three words of the string).  
+- Initially, the model will search for observed occurrences of strings of four words, where the first three words match the input, the relative frequency of this four-gram amongst all fourgrams will also be stored. Following this, the exercise will be repeated for three-grams (using the final two words of the predictor, but excluding those matches observed in the four-gram assessment), and two-grams.  Finally, any unobserved words will be considered from matching the remaining unigrams.  
+- To maximise the likelihood of the prediction being reasonable, the four-gram matches are weighted more heavily than the three-gram matches, and so on, using the Katz’s Backoff Model to combine this weighting with the frequency of the observed match.  
+- This results in a series of predicted next words, of which the highest probability is returned. 
+
+## Model Testing and Evaluation
+- Prior to developing the function (and data cleanse etc.), the data were split into two sets (for each source): a training data set and a testing data set.
+- Using a random sample of the latter data set, a series of ten predictions were performed, returning nine reasonable or correct  answers.
+- In addition to the accuracy, the speed of the model is of central importance, and so the system processing time was assessed using the tictoc package.  On each of the ten predictions run above, the average system time was c. 5 seconds for the prediction function.
+
+```{r testsample, eval = FALSE, echo = FALSE}
+### Create a vector of all test entries (note this is from the ReadingData.R file)
+alltest <- c(data1[-inTrain1$Resample1],data2[-inTrain2$Resample1], data3[-inTrain3$Resample1])
+set.seed(817412)
+sample <- sample(1:length(alltest), 10)
+testlines <- alltest[sample]
+```
+
+## Application Demonstration
+```{r appdemo, echo=FALSE, out.width = "75%", fig.align = "center", fig.show='hold'}
+knitr::include_graphics("./Image1.png")
+```
+
+1. Type the predictor phrase into the text box (note that this should have three or more words for best results)
+2. Click on the "Predict!" button (the loading graphic may then appear while the app is performing the calculation)
+3. The predicted next word will be shown
